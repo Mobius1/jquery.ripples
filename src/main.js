@@ -1,7 +1,4 @@
-import $ from 'jquery'
-
 var gl;
-var $window = $(window); // There is only one window, so why not cache the jQuery-wrapped window?
 
 function isPercentage(str) {
 	return str[str.length - 1] == '%';
@@ -209,43 +206,65 @@ var config = loadConfig();
 var transparentPixels = createImageData(32, 32);
 
 // Extend the css
-$('head').prepend('<style>.jquery-ripples { position: relative; z-index: 0; }</style>');
+var style = document.createElement("style");
+style.innerHTML = `.js-ripples { position: relative; z-index: 0; }`;
+document.head.appendChild(style);
 
 // RIPPLES CLASS DEFINITION
 // =========================
 
 var Ripples = function (el, options) {
+	
+	var defaults = {
+		imageUrl: null,
+		resolution: 256,
+		dropRadius: 20,
+		perturbance: 0.03,
+		interactive: true,
+		crossOrigin: ''
+	};
+	
 	var that = this;
-
-	this.$el = $(el);
+	
+	this.$el =el;
+	
+	if ( typeof el === "string" ) {
+		this.$el = document.querySelector(el);
+	}
+	
+	this.css = window.getComputedStyle(this.$el, null);
+	
+	this.config = Object.assign({}, defaults, options);
 
 	// Init properties from options
-	this.interactive = options.interactive;
-	this.resolution = options.resolution;
+	this.interactive = this.config.interactive;
+	this.resolution = this.config.resolution;
 	this.textureDelta = new Float32Array([1 / this.resolution, 1 / this.resolution]);
 
-	this.perturbance = options.perturbance;
-	this.dropRadius = options.dropRadius;
+	this.perturbance = this.config.perturbance;
+	this.dropRadius = this.config.dropRadius;
 
-	this.crossOrigin = options.crossOrigin;
-	this.imageUrl = options.imageUrl;
+	this.crossOrigin = this.config.crossOrigin;
 
 	// Init WebGL canvas
+	var rect = this.$el.getBoundingClientRect();
 	var canvas = document.createElement('canvas');
-	canvas.width = this.$el.innerWidth();
-	canvas.height = this.$el.innerHeight();
+	canvas.width = rect.width;
+	canvas.height = rect.height;
 	this.canvas = canvas;
-	this.$canvas = $(canvas);
-	this.$canvas.css({
-		position: 'absolute',
-		left: 0,
-		top: 0,
-		right: 0,
-		bottom: 0,
-		zIndex: -1
-	});
+	
+	console.log(this.config)
 
-	this.$el.addClass('jquery-ripples').append(canvas);
+	this.canvas.style.position = 'absolute';
+	this.canvas.style.left = 0;
+	this.canvas.style.top = 0;
+	this.canvas.style.right = 0;
+	this.canvas.style.bottom = 0;
+	// this.canvas.style.zIndex = -1;
+
+	this.$el.classList.add('js-ripples');
+	this.$el.appendChild(canvas);
+	
 	this.context = gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
 
 	// Load extensions
@@ -254,7 +273,7 @@ var Ripples = function (el, options) {
 	});
 
 	// Auto-resize when window size changes.
-	$(window).on('resize', function() {
+	window.addEventListener('resize', function(e) {
 		that.updateSize();
 	});
 
@@ -327,15 +346,6 @@ var Ripples = function (el, options) {
 	requestAnimationFrame(step);
 };
 
-Ripples.DEFAULTS = {
-	imageUrl: null,
-	resolution: 256,
-	dropRadius: 20,
-	perturbance: 0.03,
-	interactive: true,
-	crossOrigin: ''
-};
-
 Ripples.prototype = {
 
 	// Set up pointer (mouse + touch) events
@@ -346,7 +356,8 @@ Ripples.prototype = {
 			return that.visible && that.running && that.interactive;
 		}
 
-		function dropAtPointer(pointer, big) {
+		function dropAtPointer(pointer) {
+			var big = pointer.type === "mousedown";
 			if (pointerEventsEnabled()) {
 				that.dropAtPointer(
 					pointer,
@@ -355,25 +366,32 @@ Ripples.prototype = {
 				);
 			}
 		}
-
+		
 		// Start listening to pointer events
-		this.$el
+		this.events = {
+			mousemove: dropAtPointer.bind(this),
+			mousedown: dropAtPointer.bind(this),
+		};
 
-			// Create regular, small ripples for mouse move and touch events...
-			.on('mousemove.ripples', function(e) {
-				dropAtPointer(e);
-			})
-			.on('touchmove.ripples, touchstart.ripples', function(e) {
-				var touches = e.originalEvent.changedTouches;
-				for (var i = 0; i < touches.length; i++) {
-					dropAtPointer(touches[i]);
-				}
-			})
+		// Create regular, small ripples for mouse move and touch events...
+		this.$el.addEventListener('mousemove', this.events.mousemove);
+		
+// 		this.$el.addEventListener('touchmove', function(e) {
+// 			var touches = e.originalEvent.changedTouches;
+// 			for (var i = 0; i < touches.length; i++) {
+// 				dropAtPointer(touches[i]);
+// 			}
+// 		});
+		
+// 		this.$el.addEventListener('touchstart', function(e) {
+// 			var touches = e.originalEvent.changedTouches;
+// 			for (var i = 0; i < touches.length; i++) {
+// 				dropAtPointer(touches[i]);
+// 			}
+// 		});		
 
-			// ...and only a big ripple on mouse down events.
-			.on('mousedown.ripples', function(e) {
-				dropAtPointer(e, true);
-			});
+		// ...and only a big ripple on mouse down events.
+		this.$el.addEventListener('mousedown', this.events.mousedown);
 	},
 
 	// Load the image either from the options or the element's CSS rules.
@@ -382,9 +400,9 @@ Ripples.prototype = {
 
 		gl = this.context;
 
-		var newImageSource = this.imageUrl ||
+		var newImageSource = this.config.imageURL ||
 			extractUrl(this.originalCssBackgroundImage) ||
-			extractUrl(this.$el.css('backgroundImage'));
+			extractUrl(this.css.backgroundImage);
 
 		// If image source is unchanged, don't reload it.
 		if (newImageSource == this.imageSource) {
@@ -500,22 +518,22 @@ Ripples.prototype = {
 	},
 
 	computeTextureBoundaries: function() {
-		var backgroundSize = this.$el.css('background-size');
-		var backgroundAttachment = this.$el.css('background-attachment');
-		var backgroundPosition = translateBackgroundPosition(this.$el.css('background-position'));
+		var backgroundSize = this.css.backgroundSize;
+		var backgroundAttachment = this.css.backgroundAttachment;
+		var backgroundPosition = translateBackgroundPosition(this.css.backgroundPosition);
 
 		// Here the 'container' is the element which the background adapts to
 		// (either the chrome window or some element, depending on attachment)
 		var container;
 		if (backgroundAttachment == 'fixed') {
 			container = { left: window.pageXOffset, top: window.pageYOffset };
-			container.width = $window.width();
-			container.height = $window.height();
+			container.width = window.innerWidth;
+			container.height = window.innerHeight;
 		}
 		else {
-			container = this.$el.offset();
-			container.width = this.$el.innerWidth();
-			container.height = this.$el.innerHeight();
+			container = this.$el.getBoundingClientRect();
+			// container.width = this.$el.innerWidth();
+			// container.height = this.$el.innerHeight();
 		}
 
 		// TODO: background-clip
@@ -583,15 +601,15 @@ Ripples.prototype = {
 			backgroundY = container.top + parseFloat(backgroundY);
 		}
 
-		var elementOffset = this.$el.offset();
+		var elementOffset = this.$el.getBoundingClientRect();
 
 		this.renderProgram.uniforms.topLeft = new Float32Array([
 			(elementOffset.left - backgroundX) / backgroundWidth,
 			(elementOffset.top - backgroundY) / backgroundHeight
 		]);
 		this.renderProgram.uniforms.bottomRight = new Float32Array([
-			this.renderProgram.uniforms.topLeft[0] + this.$el.innerWidth() / backgroundWidth,
-			this.renderProgram.uniforms.topLeft[1] + this.$el.innerHeight() / backgroundHeight
+			this.renderProgram.uniforms.topLeft[0] + container.width / backgroundWidth,
+			this.renderProgram.uniforms.topLeft[1] + container.height / backgroundHeight
 		]);
 
 		var maxSide = Math.max(this.canvas.width, this.canvas.height);
@@ -721,7 +739,7 @@ Ripples.prototype = {
 	hideCssBackground: function() {
 
 		// Check whether we're changing inline CSS or overriding a global CSS rule.
-		var inlineCss = this.$el[0].style.backgroundImage;
+		var inlineCss = this.css.backgroundImage;
 
 		if (inlineCss == 'none') {
 			return;
@@ -729,24 +747,25 @@ Ripples.prototype = {
 
 		this.originalInlineCss = inlineCss;
 
-		this.originalCssBackgroundImage = this.$el.css('backgroundImage');
-		this.$el.css('backgroundImage', 'none');
+		this.originalCssBackgroundImage = this.css.backgroundImage;
+		this.$el.style.backgroundImage = 'none';
 	},
 
 	restoreCssBackground: function() {
 
 		// Restore background by either changing the inline CSS rule to what it was, or
 		// simply remove the inline CSS rule if it never was inlined.
-		this.$el.css('backgroundImage', this.originalInlineCss || '');
+		this.$el.style.backgroundImage = this.originalInlineCss || '';
 	},
 
 	dropAtPointer: function(pointer, radius, strength) {
-		var borderLeft = parseInt(this.$el.css('border-left-width')) || 0,
-				borderTop = parseInt(this.$el.css('border-top-width')) || 0;
+		var borderLeft = parseInt(this.css['border-left-width']) || 0,
+				borderTop = parseInt(this.css['border-top-width']) || 0,
+				rect = this.$el.getBoundingClientRect();
 
 		this.drop(
-			pointer.pageX - this.$el.offset().left - borderLeft,
-			pointer.pageY - this.$el.offset().top - borderTop,
+			pointer.pageX - rect.left - borderLeft,
+			pointer.pageY - rect.top - borderTop,
 			radius,
 			strength
 		);
@@ -758,8 +777,9 @@ Ripples.prototype = {
 	drop: function(x, y, radius, strength) {
 		gl = this.context;
 
-		var elWidth = this.$el.innerWidth();
-		var elHeight = this.$el.innerHeight();
+		var rect = this.$el.getBoundingClientRect();
+		var elWidth = rect.width;
+		var elHeight = rect.height;
 		var longestSide = Math.max(elWidth, elHeight);
 
 		radius = radius / longestSide;
@@ -785,9 +805,10 @@ Ripples.prototype = {
 	},
 
 	updateSize: function() {
-		var newWidth = this.$el.innerWidth(),
-				newHeight = this.$el.innerHeight();
-
+		var rect = this.$el.getBoundingClientRect();
+		var newWidth = rect.width,
+				newHeight = rect.height;
+		
 		if (newWidth != this.canvas.width || newHeight != this.canvas.height) {
 			this.canvas.width = newWidth;
 			this.canvas.height = newHeight;
@@ -795,12 +816,12 @@ Ripples.prototype = {
 	},
 
 	destroy: function() {
-		this.$el
-			.off('.ripples')
-			.removeClass('jquery-ripples')
-			.removeData('ripples');
-
-		this.$canvas.remove();
+		this.$el.classList.remove("js-ripples");
+		this.$el.removeChild(this.canvas);
+		
+		this.$el.removeEventListener('mousemove', this.events.mousemove);
+		this.$el.removeEventListener('mousedown', this.events.mousedown);		
+		
 		this.restoreCssBackground();
 
 		this.destroyed = true;
@@ -809,14 +830,14 @@ Ripples.prototype = {
 	show: function() {
 		this.visible = true;
 
-		this.$canvas.show();
+		this.canvas.style.display = "";
 		this.hideCssBackground();
 	},
 
 	hide: function() {
 		this.visible = false;
 
-		this.$canvas.hide();
+		this.canvas.style.display = "none";
 		this.restoreCssBackground();
 	},
 
@@ -826,60 +847,5 @@ Ripples.prototype = {
 
 	play: function() {
 		this.running = true;
-	},
-
-	set: function(property, value) {
-		switch (property) {
-			case 'dropRadius':
-			case 'perturbance':
-			case 'interactive':
-			case 'crossOrigin':
-				this[property] = value;
-				break;
-			case 'imageUrl':
-				this.imageUrl = value;
-				this.loadImage();
-				break;
-		}
 	}
-};
-
-// RIPPLES PLUGIN DEFINITION
-// ==========================
-
-var old = $.fn.ripples;
-
-$.fn.ripples = function(option) {
-	if (!config) {
-		throw new Error('Your browser does not support WebGL, the OES_texture_float extension or rendering to floating point textures.');
-	}
-
-	var args = (arguments.length > 1) ? Array.prototype.slice.call(arguments, 1) : undefined;
-
-	return this.each(function() {
-		var $this = $(this),
-				data = $this.data('ripples'),
-				options = $.extend({}, Ripples.DEFAULTS, $this.data(), typeof option == 'object' && option);
-
-		if (!data && typeof option == 'string') {
-			return;
-		}
-		if (!data) {
-			$this.data('ripples', (data = new Ripples(this, options)));
-		}
-		else if (typeof option == 'string') {
-			Ripples.prototype[option].apply(data, args);
-		}
-	});
-};
-
-$.fn.ripples.Constructor = Ripples;
-
-
-// RIPPLES NO CONFLICT
-// ====================
-
-$.fn.ripples.noConflict = function() {
-	$.fn.ripples = old;
-	return this;
 };
